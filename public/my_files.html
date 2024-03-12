@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="\css\my_files.css">
+    <title>My Files - Secure Cloud Storage</title>
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="logo">
+                <img src="logo.png" alt="Secure Cloud Storage  Logo">
+                <h1>Secure Cloud Storage </h1>
+            </div>
+            <ul>
+                <li><a href="\home.html">Home</a></li>
+                <li><a href="/profile">Profile</a></li>
+                <li><a href="/files">My Files</a></li>
+                <li><a><button id="logoutButton">Logout</button></a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <section class="container">
+        <h2>My Files</h2>
+        <div>
+            <table id="fileList">
+                <thead>
+                    <tr>
+                        <th>File Name</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Display files here -->
+                </tbody>
+            </table>
+        </div>
+        <input type="file" id="fileInput" multiple>
+        <button onclick="uploadFiles()">Upload</button>
+    </section>
+</main>
+    <script src="\js\myfiles.js"></script>
+</body>
+</html>
