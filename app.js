@@ -17,12 +17,10 @@ function encryptFile(fileBuffer, encryptionKey) {
     if (!Buffer.isBuffer(encryptionKey)) {
         throw new Error('Invalid encryption key format.');
     }
-
     //  the key length is 32 bytes
     if (encryptionKey.length !== 32) {
         throw new Error('Invalid encryption key length.');
     }
-
     const iv = crypto.randomBytes(16); // Generating a unique IV for each encryption
     const cipher = crypto.createCipheriv('aes-256-cbc', encryptionKey, iv);
     let encrypted = cipher.update(fileBuffer);
@@ -38,19 +36,23 @@ function decryptFile(encryptedFile, encryptionKey) {
         if (!encryptedFile || typeof encryptedFile !== 'object' || !('iv' in encryptedFile) || !('encryptedData' in encryptedFile)) {
             throw new Error('Invalid encrypted file format: Missing properties.');
         }
-
         const iv = Buffer.from(encryptedFile.iv, 'hex');
+        // Convert encryptionKey to Buffer if it's in string format
+        if (typeof encryptionKey === 'string') {
+            encryptionKey = Buffer.from(encryptionKey, 'hex');
+        }
         const decipher = crypto.createDecipheriv('aes-256-cbc', encryptionKey, iv);
         let decrypted = decipher.update(Buffer.from(encryptedFile.encryptedData, 'hex'));
         decrypted = Buffer.concat([decrypted, decipher.final()]);
         console.log('Decrypted File (Buffer):', decrypted);
-        console.log('Decrypted File (String):', decrypted.toString());
+        console.log('Decrypted File (String):', decrypted.toString('hex')); // Convert Buffer to hexadecimal string
         return decrypted;
     } catch (error) {
         console.error('Error decrypting file:', error.message);
         return null; // or throw an error depending on your error handling strategy
     }
 }
+
 
 // express-session
 app.use(session({
@@ -189,7 +191,7 @@ app.post('/login', async (req, res) => {
 
         // Set session ID for logged-in user
         req.session.userId = user._id;
-        req.session.encryptionKey = Buffer.from(user.encryptionKey, 'hex');
+        req.session.encryptionKey = user.encryptionKey; // Store as a hexadecimal string
         console.log('Session after login:', req.session);
         // For successful login, respond with a success message or user data
         res.status(200).json({ message: 'Login successful', user });
@@ -198,8 +200,6 @@ app.post('/login', async (req, res) => {
         console.error(error);
         res.status(500).json({ error: 'server_error' });
     }
-    // After setting session in login endpoint
-    //console.log('Session after login:', req.session);
 });
 
 //  middleware to check if the user is logged in
@@ -215,7 +215,6 @@ const isAuthenticated = async (req, res, next) => {
                     _id: user._id,
                     encryptionKey: Buffer.from(req.session.encryptionKey, 'hex'),
                 };
-                
 
                 // Proceed to the next middleware/route handler
                 next();
@@ -266,26 +265,22 @@ app.post('/upload-encrypted', isAuthenticated, upload.array('myFiles[]'), async 
     try {
         const userEncryptionKey = Buffer.from(req.session.encryptionKey, 'hex'); // Convert hex string to Buffer
         const files = req.files;
-
         if (!userEncryptionKey) {
             return res.status(400).send('Encryption key not found for the user.');
         }
-
         // Process each uploaded file
         for (const file of files) {
             const fileBuffer = fs.readFileSync(file.path); // Read file as a buffer
 
             try {
                 const encryptedFile = encryptFile(fileBuffer, userEncryptionKey);
-
                 // Store the encrypted file in the uploads directory
-                fs.writeFileSync(`public/uploads/${req.session.userId}/${file.filename}`, encryptedFile.encryptedData, 'hex');
+                fs.writeFileSync(`public/uploads/${req.session.userId}/${file.filename}`, JSON.stringify(encryptedFile), 'utf8');
             } catch (encryptError) {
                 console.error('Error encrypting file:', encryptError);
                 return res.status(500).send('Failed to encrypt files');
             }
         }
-
         res.status(200).send('Files uploaded and encrypted successfully');
     } catch (error) {
         console.error('Error uploading files:', error);
@@ -301,25 +296,20 @@ app.get('/download/:filename', isAuthenticated, async (req, res) => {
 
     try {
         console.log('Request to download file. User ID:', req.session.userId);
-
         if (fs.existsSync(file)) {
             const user = await User.findById(req.session.userId);
-
             if (user) {
                 console.log('User found. User:', user);
-
-                if (user.encryptionKey && user.encryptionKey.length === 32) {
-                    const userEncryptionKey = Buffer.from(user.encryptionKey, 'hex');
-                    console.log('User Encryption Key:', userEncryptionKey);
-
-                    // Modify this line to read the file as a buffer without specifying encoding
-                    const fileBuffer = fs.readFileSync(file);
-
-                    console.log('File Buffer Length:', fileBuffer.length); // Add this line for debugging
-
+                if (req.session.encryptionKey && req.session.encryptionKey.length === 64) { // Check length of hexadecimal string
+                    const userEncryptionKey = Buffer.from(req.session.encryptionKey, 'hex'); // Convert hex string to Buffer
+                    console.log('User Encryption Key from Session:', userEncryptionKey);
+                    const fileBuffer = fs.readFileSync(file, 'utf8');
+                    console.log('File Buffer Length:', fileBuffer.length);
                     if (fileBuffer.length > 0) {
-                        const decryptedFile = decryptFile({ encryptedData: fileBuffer }, userEncryptionKey);
+                        const decryptedFile = decryptFile(JSON.parse(fileBuffer), userEncryptionKey);
+                        console.log('Decrypted File (Buffer):', decryptedFile);
                         if (decryptedFile) {
+                            console.log('Decrypted File Length:', decryptedFile.length);
                             res.set('Content-Disposition', `attachment; filename=${fileName}`);
                             res.send(decryptedFile);
                         } else {
@@ -331,8 +321,8 @@ app.get('/download/:filename', isAuthenticated, async (req, res) => {
                         res.status(500).send('File Buffer length is 0');
                     }
                 } else {
-                    console.error('Invalid encryption key:', user.encryptionKey);
-                    res.status(400).send('Invalid encryption key.');
+                    console.error('Invalid encryption key in session:', req.session.encryptionKey);
+                    res.status(400).send('Invalid encryption key in session.');
                 }
             } else {
                 console.error('User not found:', req.session.userId);
@@ -347,9 +337,6 @@ app.get('/download/:filename', isAuthenticated, async (req, res) => {
         res.status(500).send('Failed to download file');
     }
 });
-
-
-
 // Endpoint to delete files
 app.delete('/delete/:filename', isAuthenticated, (req, res) => {
     const userDirectory = `public/uploads/${req.session.userId}/`; // Adjust path for user-specific files
@@ -365,7 +352,6 @@ app.delete('/delete/:filename', isAuthenticated, (req, res) => {
         }
     });
 });
-
 
 // Endpoint to list uploaded files
 app.get('/list-files', isAuthenticated, (req, res) => {
